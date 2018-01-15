@@ -21,8 +21,13 @@ Various settings can affect the operation of the server:
                    Function.__doc__ should be long help
                    Function.aliases may be a list of alternative spellings
 """
+import sys
 
-import SocketServer
+if sys.version_info > (3, 0):
+    from socketserver import BaseRequestHandler
+else:
+    from SocketServer import BaseRequestHandler
+
 import socket
 import struct
 import sys
@@ -367,7 +372,7 @@ class InputBashLike(object):
             self.process( self.handler.readline(prompt=self.handler.CONTINUE_PROMPT) )
 
 
-class TelnetHandlerBase(SocketServer.BaseRequestHandler):
+class TelnetHandlerBase(BaseRequestHandler):
     "A telnet server based on the client in telnetlib"
     
     # Several methods are not fully defined in this class, and are
@@ -480,8 +485,8 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
             self.COMMANDS[name] = method
             for alias in getattr(method, "aliases", []):
                 self.COMMANDS[alias.upper()] = self.COMMANDS[name]
-                    
-        SocketServer.BaseRequestHandler.__init__(self, request, client_address, server)
+
+        BaseRequestHandler.__init__(self, request, client_address, server)
     
     class false_request(object):
         def __init__(self):
@@ -524,7 +529,12 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
         except:
             pass
         self.setterm(self.TERM)
-        self.sock = self.request._sock
+
+        if hasattr(self.request, '_sock'):
+            self.sock = self.request._sock
+        else:
+            self.sock = self.request
+
         for k in self.DOACK.keys():
             self.sendcommand(self.DOACK[k], k)
         for k in self.WILLACK.keys():
@@ -552,14 +562,14 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
         if cmd == NOP:
             self.sendcommand(NOP)
         elif cmd == WILL or cmd == WONT:
-            if self.WILLACK.has_key(opt):
+            if opt in self.WILLACK:
                 self.sendcommand(self.WILLACK[opt], opt)
             else:
                 self.sendcommand(DONT, opt)
             if cmd == WILL and opt == TTYPE:
                 self.writecooked(IAC + SB + TTYPE + SEND + IAC + SE)
         elif cmd == DO or cmd == DONT:
-            if self.DOACK.has_key(opt):
+            if opt in self.DOACK:
                 self.sendcommand(self.DOACK[opt], opt)
             else:
                 self.sendcommand(WONT, opt)
@@ -582,14 +592,14 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
     def sendcommand(self, cmd, opt=None):
         "Send a telnet command (IAC)"
         if cmd in [DO, DONT]:
-            if not self.DOOPTS.has_key(opt):
+            if opt not in self.DOOPTS:
                 self.DOOPTS[opt] = None
             if (((cmd == DO) and (self.DOOPTS[opt] != True))
             or ((cmd == DONT) and (self.DOOPTS[opt] != False))):
                 self.DOOPTS[opt] = (cmd == DO)
                 self.writecooked(IAC + cmd + opt)
         elif cmd in [WILL, WONT]:
-            if not self.WILLOPTS.has_key(opt):
+            if not opt in self.WILLOPTS:
                 self.WILLOPTS[opt] = ''
             if (((cmd == WILL) and (self.WILLOPTS[opt] != True))
             or ((cmd == WONT) and (self.WILLOPTS[opt] != False))):
@@ -803,7 +813,10 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
 
     def writecooked(self, text):
         """Put data directly into the output queue (bypass output cooker)"""
-        self.sock.sendall(text)
+        if sys.version_info > (3, 0):
+            self.sock.sendall(text.encode('latin1'))
+        else:
+            self.sock.sendall(text)
 
 # ------------------------------- Input Cooker -----------------------------
     def _inputcooker_getc(self, block=True):
@@ -817,7 +830,11 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
         if not block:
             if not self.inputcooker_socket_ready():
                 return ''
-        ret = self.sock.recv(20)
+        if sys.version_info > (3, 0):
+            ret = self.sock.recv(20).decode('latin1')
+        else:
+            ret = self.sock.recv(20)
+
         self.eof = not(ret)
         self.rawq = self.rawq + ret
         if self.eof:
@@ -926,7 +943,7 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
         """
         if params:
             cmd = params[0].upper()
-            if self.COMMANDS.has_key(cmd):
+            if cmd in self.COMMANDS:
                 method = self.COMMANDS[cmd]
                 doc = method.__doc__.split("\n")
                 docp = doc[0].strip()
@@ -945,8 +962,7 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
                 self.writeline("Command '%s' not known" % cmd)
         else:
             self.writeline("Help on built in commands\n")
-        keys = self.COMMANDS.keys()
-        keys.sort()
+        keys = sorted(self.COMMANDS.keys())
         for cmd in keys:
             method = self.COMMANDS[cmd]
             if getattr(method, 'hidden', False):
@@ -1037,7 +1053,7 @@ class TelnetHandlerBase(SocketServer.BaseRequestHandler):
             if self.input.cmd:
                 cmd = self.input.cmd.upper()
                 params = self.input.params
-                if self.COMMANDS.has_key(cmd):
+                if cmd in self.COMMANDS:
                     try:
                         self.COMMANDS[cmd](params)
                     except:
