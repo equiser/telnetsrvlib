@@ -7,7 +7,7 @@ def readme():
 setup(
     name = "telnetsrv",
     packages = ["telnetsrv"],
-    version = "0.4b1",
+    version = "0.5b1",
     extras_require = {
         'green': ['gevent'],
         'ssh': ['paramiko'],
